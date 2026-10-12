@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: CitySutra AI opt-in persistent backend. No resources are created by the local app.
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 10
+    MemorySize: 512
+    Environment:
+      Variables:
+        DYNAMODB_TABLE_NAME: !Ref IncidentsTable
+        DATA_BUCKET_NAME: !Ref CitySutraDataBucket
+Resources:
+  CitySutraDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  CitySutraApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: ['*']
+        AllowHeaders: ['content-type']
+        AllowMethods: ['GET','POST','PATCH','OPTIONS']
+  IncidentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: incidentId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: incidentId
+          KeyType: HASH
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/
+      Handler: handler.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentsTable
+        - S3ReadPolicy:
+            BucketName: !Ref CitySutraDataBucket
+      LoggingConfig:
+        LogGroup: !Ref CitySutraApiLogGroup
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref IncidentsTable
+          DATA_BUCKET_NAME: !Ref CitySutraDataBucket
+          AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
+  CitySutraApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+      Events:
+        Health:
+          Type: HttpApi
+          Properties: {ApiId: !Ref CitySutraApi, Path: /health, Method: GET}
+        Incidents:
+          Type: HttpApi
+          Properties: {ApiId: !Ref CitySutraApi, Path: /incidents, Method: ANY}
+        Incident:
+          Type: HttpApi
+          Properties: {ApiId: !Ref CitySutraApi, Path: /incidents/{incidentId}, Method: ANY}
+        Actions:
+          Type: HttpApi
+          Properties: {ApiId: !Ref CitySutraApi, Path: /actions, Method: GET}
+Outputs:
+  ApiUrl:
+    Value: !Sub 'https://${CitySutraApi}.execute-api.${AWS::Region}.amazonaws.com'
+  TableName:
+    Value: !Ref IncidentsTable
+  DataBucketName:
+    Value: !Ref CitySutraDataBucket
+  LogGroupName:
+    Value: !Ref CitySutraApiLogGroup
